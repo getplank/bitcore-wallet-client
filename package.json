@@ -23,7 +23,7 @@
     "async": "^0.9.0",
     "bitcore": "git://github.com/bitpay/bitcore.git#a4ac3f50d300b3f89fad02f9e38fc536ac90abdc",
     "bitcore-payment-protocol": "git://github.com/getplank/bitcore-payment-protocol.git",
-    "bitcore-wallet-utils": "0.0.15",
+    "bitcore-wallet-utils": "git://github.com/getplank/bitcore-wallet-utils.git",
     "browser-request": "^0.3.3",
     "browserify": "^9.0.3",
     "lodash": "^3.3.1",
