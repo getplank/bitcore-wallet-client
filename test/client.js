@@ -121,12 +121,22 @@ blockchainExplorerMock.getUnspentUtxos = function(addresses, cb) {
 };
 
 blockchainExplorerMock.setUtxo = function(address, amount, m, confirmations) {
+  var scriptPubKey;
+  switch (address.type) {
+    case WalletUtils.SCRIPT_TYPES.P2SH:
+      scriptPubKey = address.publicKeys ? Bitcore.Script.buildMultisigOut(address.publicKeys, m).toScriptHashOut() : '';
+      break;
+    case WalletUtils.SCRIPT_TYPES.P2PKH:
+      scriptPubKey = Bitcore.Script.buildPublicKeyHashOut(address.address);
+      break;
+  }
+  should.exist(scriptPubKey);
   blockchainExplorerMock.utxos.push({
     txid: Bitcore.crypto.Hash.sha256(new Buffer(Math.random() * 100000)).toString('hex'),
     vout: Math.floor((Math.random() * 10) + 1),
     amount: amount,
     address: address.address,
-    scriptPubKey: address.publicKeys ? Bitcore.Script.buildMultisigOut(address.publicKeys, m).toScriptHashOut().toString() : '',
+    scriptPubKey: scriptPubKey.toBuffer().toString('hex'),
     confirmations: _.isUndefined(confirmations) ? Math.floor((Math.random() * 100) + 1) : +confirmations,
   });
 };
@@ -557,12 +567,11 @@ describe('client API', function() {
 
     it('should prepare wallet with external xpubkey', function(done) {
       var client = helpers.newClient(app);
-      client.seedFromExtendedPublicKey('xpub661MyMwAqRbcGVyYUcHbZi9KNhN9Tdj8qHi9ZdoUXP1VeKiXDGGrE9tSoJKYhGFE2rimteYdwvoP6e87zS5LsgcEvsvdrpPBEmeWz9EeAUq', 'ledger', 2, '1a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f00');
+      client.seedFromExtendedPublicKey('xpub661MyMwAqRbcGVyYUcHbZi9KNhN9Tdj8qHi9ZdoUXP1VeKiXDGGrE9tSoJKYhGFE2rimteYdwvoP6e87zS5LsgcEvsvdrpPBEmeWz9EeAUq', 'ledger', '1a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f00');
       client.isPrivKeyExternal().should.equal(true);
       client.credentials.requestPrivKey.should.equal('36a4504f0c6651db30484c2c128304a7ea548ef5935f19ed6af99db8000c75a4');
       client.credentials.personalEncryptingKey.should.equal('wYI1597BfOv06NI6Uye3tA==');
       client.getPrivKeyExternalSourceName().should.equal('ledger');
-      client.getExternalIndex().should.equal(2);
       done();
     });
 
@@ -662,18 +671,29 @@ describe('client API', function() {
   });
 
   describe('Address Creation', function() {
+    it('should be able to create address in 1-of-1 wallet', function(done) {
+      helpers.createAndJoinWallet(clients, 1, 1, function() {
+        clients[0].createAddress(function(err, x) {
+          should.not.exist(err);
+          should.exist(x.address);
+          x.address.charAt(0).should.not.equal('2');
+          done();
+        });
+      });
+    });
     it('should be able to create address in all copayers in a 2-3 wallet', function(done) {
       this.timeout(5000);
       helpers.createAndJoinWallet(clients, 2, 3, function() {
-        clients[0].createAddress(function(err, x0) {
+        clients[0].createAddress(function(err, x) {
           should.not.exist(err);
-          should.exist(x0.address);
-          clients[1].createAddress(function(err, x1) {
+          should.exist(x.address);
+          x.address.charAt(0).should.equal('2');
+          clients[1].createAddress(function(err, x) {
             should.not.exist(err);
-            should.exist(x1.address);
-            clients[2].createAddress(function(err, x2) {
+            should.exist(x.address);
+            clients[2].createAddress(function(err, x) {
               should.not.exist(err);
-              should.exist(x2.address);
+              should.exist(x.address);
               done();
             });
           });
@@ -1509,14 +1529,14 @@ describe('client API', function() {
           var opts = {
             amount: 10000000,
             toAddress: 'n2TBMPzPECGUfcT2EByiTJ12TPZkhN2mN5',
-            message: 'hello 1-1',
+            message: 'hello',
           };
           clients[0].sendTxProposal(opts, function(err, txp) {
             should.not.exist(err);
             txp.requiredRejections.should.equal(1);
             txp.requiredSignatures.should.equal(1);
             txp.status.should.equal('pending');
-            txp.changeAddress.path.should.equal('m/2147483647/1/0');
+            txp.changeAddress.path.should.equal('m/1/0');
             clients[0].signTxProposal(txp, function(err, txp) {
               should.not.exist(err);
               txp.status.should.equal('accepted');
@@ -1540,7 +1560,7 @@ describe('client API', function() {
           var opts = {
             amount: 10000,
             toAddress: 'n2TBMPzPECGUfcT2EByiTJ12TPZkhN2mN5',
-            message: 'hello 1-1',
+            message: 'hello',
           };
           clients[0].sendTxProposal(opts, function(err, txp) {
             should.not.exist(err);
@@ -1556,8 +1576,6 @@ describe('client API', function() {
               var b = st.balance;
               b.totalAmount.should.equal(1000000000);
               b.lockedAmount.should.equal(1000000000);
-
-
               clients[0].signTxProposal(txp, function(err, txp) {
                 should.not.exist(err, err);
                 txp.status.should.equal('pending');
@@ -1895,28 +1913,6 @@ describe('client API', function() {
         importedClient = helpers.newClient(app);
         importedClient.import(exported);
       });
-      it('should export & import compressed', function(done) {
-        var walletId = clients[0].credentials.walletId;
-        var walletName = clients[0].credentials.walletName;
-        var copayerName = clients[0].credentials.copayerName;
-
-        var exported = clients[0].export({
-          compressed: true
-        });
-
-        importedClient = helpers.newClient(app);
-        importedClient.import(exported, {
-          compressed: true
-        });
-
-        importedClient.openWallet(function(err) {
-          should.not.exist(err);
-          importedClient.credentials.walletId.should.equal(walletId);
-          importedClient.credentials.walletName.should.equal(walletName);
-          importedClient.credentials.copayerName.should.equal(copayerName);
-          done();
-        });
-      });
       it('should export without signing rights', function() {
         clients[0].canSign().should.be.true;
         var exported = clients[0].export({
@@ -2004,14 +2000,14 @@ describe('client API', function() {
       });
       it('should import with external priv key', function(done) {
         var client = helpers.newClient(app);
-        client.seedFromExtendedPublicKey('xpub661MyMwAqRbcGVyYUcHbZi9KNhN9Tdj8qHi9ZdoUXP1VeKiXDGGrE9tSoJKYhGFE2rimteYdwvoP6e87zS5LsgcEvsvdrpPBEmeWz9EeAUq', 'ledger', 2, '1a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f00');
+        client.seedFromExtendedPublicKey('xpub661MyMwAqRbcGVyYUcHbZi9KNhN9Tdj8qHi9ZdoUXP1VeKiXDGGrE9tSoJKYhGFE2rimteYdwvoP6e87zS5LsgcEvsvdrpPBEmeWz9EeAUq', 'ledger', '1a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f00');
         client.createWallet('wallet name', 'creator', 1, 1, {
           network: 'livenet'
         }, function(err) {
           should.not.exist(err);
           var c = client.credentials;
           importedClient = helpers.newClient(app);
-          importedClient.importFromExtendedPublicKey('xpub661MyMwAqRbcGVyYUcHbZi9KNhN9Tdj8qHi9ZdoUXP1VeKiXDGGrE9tSoJKYhGFE2rimteYdwvoP6e87zS5LsgcEvsvdrpPBEmeWz9EeAUq', 'ledger', 2, '1a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f00', function(err) {
+          importedClient.importFromExtendedPublicKey('xpub661MyMwAqRbcGVyYUcHbZi9KNhN9Tdj8qHi9ZdoUXP1VeKiXDGGrE9tSoJKYhGFE2rimteYdwvoP6e87zS5LsgcEvsvdrpPBEmeWz9EeAUq', 'ledger', '1a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f001a1f00', function(err) {
             should.not.exist(err);
             var c2 = importedClient.credentials;
             c2.xPubKey.should.equal(client.credentials.xPubKey);
@@ -2026,7 +2022,7 @@ describe('client API', function() {
       it('should fail to import with external priv key when not enought entropy', function() {
         var client = helpers.newClient(app);
         (function() {
-        client.seedFromExtendedPublicKey('xpub661MyMwAqRbcGVyYUcHbZi9KNhN9Tdj8qHi9ZdoUXP1VeKiXDGGrE9tSoJKYhGFE2rimteYdwvoP6e87zS5LsgcEvsvdrpPBEmeWz9EeAUq', 'ledger', 2, '1a1f00');
+          client.seedFromExtendedPublicKey('xpub661MyMwAqRbcGVyYUcHbZi9KNhN9Tdj8qHi9ZdoUXP1VeKiXDGGrE9tSoJKYhGFE2rimteYdwvoP6e87zS5LsgcEvsvdrpPBEmeWz9EeAUq', 'ledger', '1a1f00');
         }).should.throw('entropy');
       });
 
@@ -2651,14 +2647,14 @@ describe('client API', function() {
             should.not.exist(err);
             recoveryClient.getStatus(function(err, status) {
               should.not.exist(err);
-              _.pluck(status.wallet.copayers, 'name').should.deep.equal(['123', '234', '345']);
+              _.pluck(status.wallet.copayers, 'name').sort().should.deep.equal(['123', '234', '345']);
               var t2 = ImportData.copayers[1];
               var c2p = helpers.newClient(newApp);
               c2p.createWalletFromOldCopay(t2.username, t2.password, t2.ls[w], function(err) {
                 should.not.exist(err);
                 c2p.getStatus(function(err, status) {
                   should.not.exist(err);
-                  _.pluck(status.wallet.copayers, 'name').should.deep.equal(['123', '234', '345']);
+                  _.pluck(status.wallet.copayers, 'name').sort().should.deep.equal(['123', '234', '345']);
                   done();
                 });
               });
@@ -2773,7 +2769,7 @@ describe('client API', function() {
     });
 
 
-    it('should export & import uncompressed, locked', function(done) {
+    it('should export & import locked', function(done) {
       var walletId = c1.credentials.walletId;
       var walletName = c1.credentials.walletName;
       var copayerName = c1.credentials.copayerName;
@@ -2794,29 +2790,6 @@ describe('client API', function() {
       });
     });
 
-
-    it('should export & import compressed, locked', function(done) {
-      var walletId = c1.credentials.walletId;
-      var walletName = c1.credentials.walletName;
-      var copayerName = c1.credentials.copayerName;
-      var exported = c1.export({
-        compressed: true
-      });
-      importedClient = helpers.newClient(app);
-      importedClient.import(exported, {
-        compressed: true,
-        password: password,
-      });
-      importedClient.openWallet(function(err) {
-        should.not.exist(err);
-        importedClient.credentials.walletId.should.equal(walletId);
-        importedClient.credentials.walletName.should.equal(walletName);
-        importedClient.credentials.copayerName.should.equal(copayerName);
-        importedClient.isPrivKeyEncrypted().should.equal(true);
-        importedClient.hasPrivKeyEncrypted().should.equal(true);
-        done();
-      });
-    });
     it('should not sign when locked', function(done) {
       c1.createAddress(function(err, x0) {
         should.not.exist(err);
